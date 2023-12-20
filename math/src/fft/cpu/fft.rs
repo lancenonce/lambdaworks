@@ -3,6 +3,8 @@ use crate::field::{
     traits::{IsFFTField, IsField, IsSubFieldOf},
 };
 
+use super::bit_reversing::in_place_bit_reverse_permute;
+
 /// In-Place Radix-2 NR DIT FFT algorithm over a slice of two-adic field elements.
 /// It's required that the twiddle factors are in bit-reverse order. Else this function will not
 /// return fourier transformed values.
@@ -177,6 +179,61 @@ where
     }
 }
 
+/// In-Place Split-Radix FFT algorithm over a slice of two-adic field elements.
+/// It's required that the twiddle factors are in bit-reverse order. Else this function will not
+/// return Fourier transformed values.
+/// Also, the input size needs to be a power of two.
+/// It's recommended to use the current safe abstractions instead of this function.
+///
+/// Performs a fast Fourier transform with the next attributes:
+/// - In-Place: an auxiliary vector of data isn't needed for the algorithm.
+/// - Split-Radix: combines radix-2 and radix-4 algorithms for efficiency.
+/// - NR: natural to reverse order, meaning that the input is naturally ordered and the output will
+/// be bit-reversed ordered.
+/// - DIT: decimation in time
+///
+/// It supports values in a field E and domain in a subfield F.
+pub fn in_place_split_radix_fft<F, E>(input: &mut [FieldElement<E>], twiddles: &[FieldElement<F>])
+where
+    F: IsFFTField + IsSubFieldOf<E>,
+    E: IsField,
+{
+    let n = input.len();
+    debug_assert!(n.is_power_of_two());
+
+    if n <= 2 {
+        if n == 2 {
+            let temp = input[0].clone() + &input[1];
+            input[1] = input[0].clone() - &input[1];
+            input[0] = temp;
+        }
+        return;
+    }
+
+    // Recursively calls the function on half and quarters of the input
+    let half_n = n / 2;
+    in_place_split_radix_fft(&mut input[..half_n], &twiddles);
+    in_place_split_radix_fft(&mut input[half_n..half_n + n / 4], &twiddles);
+    in_place_split_radix_fft(&mut input[half_n + n / 4..], &twiddles);
+
+    // Apply twiddle factors and combine the results
+    for k in 0..n / 4 {
+        let w1 = &twiddles[k];
+        let w3 = &twiddles[3 * k];
+        let a = input[k + half_n].clone();
+        let b = input[k + half_n + n / 4].clone();
+
+        let a_times_w1 = w1 * &a;
+        let b_times_w3 = w3 * &b;
+
+        input[k + half_n] = input[k].clone() - &a_times_w1;
+        input[k] += a_times_w1;
+
+        input[k + half_n + n / 4] = input[k + n / 4].clone() - &b_times_w3;
+        input[k + n / 4] += b_times_w3;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::fft::cpu::bit_reversing::in_place_bit_reverse_permute;
@@ -252,6 +309,21 @@ mod tests {
 
             let mut result = coeffs;
             in_place_nr_4radix_fft::<F, F>(&mut result, &twiddles);
+            in_place_bit_reverse_permute(&mut result);
+
+            prop_assert_eq!(expected, result);
+        }
+
+        // Property-based test that ensures Split-Radix FFT gives the same result as a naive DFT.
+        #[test]
+        fn test_split_radix_fft_matches_naive_eval(coeffs in field_vec(5)) {
+            let expected = naive_matrix_dft_test(&coeffs);
+
+            let order = coeffs.len().trailing_zeros();
+            let twiddles = get_twiddles(order.into(), RootsConfig::BitReverse).unwrap();
+
+            let mut result = coeffs;
+            in_place_split_radix_fft::<F, F>(&mut result, &twiddles);
             in_place_bit_reverse_permute(&mut result);
 
             prop_assert_eq!(expected, result);
