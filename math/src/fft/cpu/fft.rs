@@ -314,7 +314,6 @@ mod tests {
             prop_assert_eq!(expected, result);
         }
 
-        // Property-based test that ensures Split-Radix FFT gives the same result as a naive DFT.
         #[test]
         fn test_split_radix_fft_matches_naive_eval(coeffs in field_vec(5)) {
             let expected = naive_matrix_dft_test(&coeffs);
