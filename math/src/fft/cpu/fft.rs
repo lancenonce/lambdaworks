@@ -218,8 +218,8 @@ where
 
     // Apply twiddle factors and combine the results
     for k in 0..n / 4 {
-        let w1 = &twiddles[k];
-        let w3 = &twiddles[3 * k];
+        let w1 = &twiddles[k % twiddles.len()];
+        let w3 = &twiddles[(3 * k) % twiddles.len()];
         let a = input[k + half_n].clone();
         let b = input[k + half_n + n / 4].clone();
 
@@ -327,5 +327,6 @@ mod tests {
 
             prop_assert_eq!(expected, result);
         }
+
     }
 }
